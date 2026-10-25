@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Boozo Bingo — Halloween Bar Crawl</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>" />
+</head>
+<body>
+  <!-- ── HOME SCREEN ─────────────────────────────────────────────────── -->
+  <div id="screen-home" class="screen active">
+    <div class="home-glow"></div>
+    <div class="home-content">
+      <div class="logo">
+        <span class="logo-icon">🎃</span>
+        <h1>Boozo Bingo</h1>
+        <p class="tagline">Halloween Bar Crawl Edition</p>
+      </div>
+      <div class="card form-card">
+        <div class="input-group">
+          <label for="home-name">Your Name</label>
+          <input id="home-name" type="text" placeholder="e.g. Ghostface" maxlength="20" autocomplete="off" />
+        </div>
+        <div class="home-actions">
+          <button id="btn-create" class="btn btn-primary">Create Room</button>
+          <div class="divider"><span>or join existing</span></div>
+          <div class="join-row">
+            <input id="home-code" type="text" placeholder="Room Code" maxlength="5" autocomplete="off" />
+            <button id="btn-join" class="btn btn-secondary">Join</button>
+          </div>
+        </div>
+        <p id="home-error" class="error-msg"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LOBBY SCREEN ────────────────────────────────────────────────── -->
+  <div id="screen-lobby" class="screen">
+    <div class="lobby-header">
+      <button id="btn-lobby-leave" class="btn btn-ghost btn-sm">← Leave</button>
+      <h2>Waiting Room</h2>
+      <div></div>
+    </div>
+    <div class="lobby-content">
+      <div class="room-code-box">
+        <p class="room-code-label">Room Code</p>
+        <div class="room-code-display" id="lobby-code"></div>
+        <button id="btn-copy-code" class="btn btn-ghost btn-sm">📋 Copy</button>
+      </div>
+      <div class="players-section">
+        <p class="players-label">Players (<span id="lobby-player-count">1</span>)</p>
+        <ul id="lobby-player-list" class="player-list"></ul>
+      </div>
+      <div class="lobby-actions">
+        <button id="btn-start" class="btn btn-primary btn-lg">🎃 Start Game</button>
+        <p id="lobby-error" class="error-msg"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GAME SCREEN ─────────────────────────────────────────────────── -->
+  <div id="screen-game" class="screen">
+    <div class="game-header">
+      <div class="game-header-left">
+        <button id="btn-game-leave" class="btn btn-ghost btn-sm">← Leave</button>
+      </div>
+      <div class="game-header-center">
+        <div class="room-code-mini" id="game-room-code"></div>
+      </div>
+      <div class="game-header-right">
+        <button id="btn-new-game" class="btn btn-ghost btn-sm" style="display:none">🔄 New Game</button>
+      </div>
+    </div>
+    <div class="game-body">
+      <div class="bingo-card-wrapper">
+        <div class="bingo-card" id="bingo-card"></div>
+      </div>
+      <div class="game-sidebar">
+        <div class="sidebar-section">
+          <p class="sidebar-label">Players</p>
+          <ul id="game-player-list" class="player-list player-list-sm"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── WINNER MODAL ────────────────────────────────────────────────── -->
+  <div id="winner-modal" class="modal" style="display:none">
+    <div class="confetti" id="confetti-canvas"></div>
+    <div class="modal-content winner-modal-content">
+      <div class="winner-emoji">👻</div>
+      <h2 class="winner-title" id="winner-title">BINGO!</h2>
+      <p class="winner-name" id="winner-name"></p>
+      <p class="winner-perk">Winner picks:<br><strong>🧃 Free drink</strong> or <strong>🎯 Next stop!</strong></p>
+      <button id="btn-dismiss-winner" class="btn btn-primary">Let's Go! 👻</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
