@@ -46,7 +46,7 @@ function init() {
   });
 
   socket.on('PLAYER_JOINED', ({ player }) => {
-    players.push(player);
+    updatePlayerFromServer({ playerId: player.id, playerName: player.name, markCount: player.markCount, isHost: player.isHost });
     renderLobbyPlayers();
     if (gameStarted) renderGamePlayers();
   });
@@ -71,25 +71,30 @@ function init() {
     renderGame();
   });
 
+  socket.on('MARKS_SYNC', ({ marks }) => {
+    myMarks = new Set(marks || []);
+    syncMyCells();
+    updateMarkBingoButton();
+  });
+
   socket.on('SQUARE_MARKED', ({ playerId, playerName, cardIndex, marked, markCount }) => {
     if (playerId === myPlayerId) {
+      // MARKS_SYNC carries the authoritative set for my card; this event only
+      // keeps mark counts and the optimistic-free UI honest.
       if (marked) myMarks.add(cardIndex);
       else myMarks.delete(cardIndex);
+      syncMyCells();
     }
-    const player = players.find(p => p.id === playerId);
-    if (player) player.markCount = markCount;
-
-    // Update the cell UI
-    const cell = document.querySelector(`[data-index="${cardIndex}"]`);
-    if (cell) {
-      cell.classList.toggle('marked', marked);
-    }
+    updatePlayerFromServer({ playerId, playerName, markCount });
     renderGamePlayers();
+    updateMarkBingoButton();
   });
 
   socket.on('WINNER', ({ playerId, playerName }) => {
     bingoWinner = { id: playerId, name: playerName };
     showWinnerModal(playerName);
+    const markBtn = document.getElementById('btn-mark-bingo');
+    if (markBtn) markBtn.style.display = 'none';
   });
 
   // ── Home screen events ──
@@ -138,6 +143,16 @@ function init() {
     location.reload();
   });
 
+  document.getElementById('btn-mark-bingo').addEventListener('click', () => {
+    document.querySelectorAll('#bingo-card .bingo-cell').forEach(cell => {
+      if (!cell.classList.contains('free-space')) {
+        cell.classList.add('marked');
+        myMarks.add(parseInt(cell.dataset.index, 10));
+      }
+    });
+    document.getElementById('btn-mark-bingo').style.display = 'none';
+  });
+
   document.getElementById('btn-dismiss-winner').addEventListener('click', () => {
     document.getElementById('winner-modal').style.display = 'none';
   });
@@ -176,7 +191,18 @@ function renderGame() {
   document.getElementById('game-room-code').textContent = currentRoomCode;
   renderBingoCard();
   renderGamePlayers();
+  updateMarkBingoButton();
   document.getElementById('btn-new-game').style.display = bingoWinner ? 'inline-block' : 'none';
+}
+
+// Offer the "I got BINGO" shortcut once the board is nearly complete, so nobody
+// has to tap nineteen squares on a phone at a bar. Marks still go through the server.
+function updateMarkBingoButton() {
+  const btn = document.getElementById('btn-mark-bingo');
+  if (!btn) return;
+  if (bingoWinner || !myCard) { btn.style.display = 'none'; return; }
+  const remaining = myCard.filter((item, i) => item.id !== -1 && !myMarks.has(i)).length;
+  btn.style.display = remaining <= 7 ? 'inline-block' : 'none';
 }
 
 function renderBingoCard() {
@@ -199,14 +225,21 @@ function renderBingoCard() {
   // Attach tap handlers
   cardEl.querySelectorAll('.bingo-cell:not(.free-space)').forEach(cell => {
     cell.addEventListener('click', () => {
+      if (bingoWinner) return;
       const idx = parseInt(cell.dataset.index, 10);
-      const wasMarked = myMarks.has(idx);
+      // No optimistic toggle: the server echo drives the UI, so a rejected or
+      // racing tap can never desync the board from real state.
       socket.emit('MARK_SQUARE', { cardIndex: idx });
-      // Optimistic UI — toggle now, server will confirm
-      cell.classList.toggle('marked', !wasMarked);
-      if (!wasMarked) myMarks.add(idx);
-      else myMarks.delete(idx);
     });
+  });
+}
+
+// Re-render marks from myMarks without rebuilding the card (keeps handlers).
+function syncMyCells() {
+  document.querySelectorAll('#bingo-card .bingo-cell').forEach(cell => {
+    if (cell.classList.contains('free-space')) return;
+    const idx = parseInt(cell.dataset.index, 10);
+    cell.classList.toggle('marked', myMarks.has(idx));
   });
 }
 
@@ -218,6 +251,19 @@ function renderGamePlayers() {
       <span class="mark-count">${p.markCount || 0} 🎃</span>
     </li>
   `).join('');
+}
+
+// Re-sync a player from a server event without clobbering existing entries.
+function updatePlayerFromServer({ playerId, playerName, markCount, isHost }) {
+  let p = players.find(x => x.id === playerId);
+  if (!p) {
+    p = { id: playerId, name: playerName || 'Player', isHost: !!isHost, markCount: markCount || 0 };
+    players.push(p);
+  } else {
+    if (typeof markCount === 'number') p.markCount = markCount;
+    if (playerName) p.name = playerName;
+  }
+  return p;
 }
 
 // ── Winner Modal ───────────────────────────────────────────────────────
