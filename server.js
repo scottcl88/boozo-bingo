@@ -93,17 +93,17 @@ function generateRoomCode() {
 function generateCard() {
   const shuffled = shuffle(BINGO_ITEMS);
   const card = new Array(25);
-  // Fill positions 0-11
+  // Fill positions 0-11, insert the free space at 12, then fill 13-24 with the
+  // remaining 12 items. (The old loop overwrote the centre cell and read past the
+  // end of the shuffled list, leaving 12 items unused and cell 24 blank.)
   for (let i = 0; i < 12; i++) card[i] = shuffled[i];
-  // FREE SPACE at center
   card[FREE_SPACE_INDEX] = { id: -1, label: 'FREE SPACE', emoji: '👻' };
-  // Fill positions 13-24
-  for (let i = 12; i < 24; i++) card[i] = shuffled[i];
+  for (let i = FREE_SPACE_INDEX + 1; i < 25; i++) card[i] = shuffled[i - 1];
   return card;
 }
 
 // Check if a set of marks produces a bingo
-function checkBingo(marks, card) {
+function checkBingo(marks) {
   for (const line of BINGO_LINES) {
     if (line.every(pos => pos === FREE_SPACE_INDEX || marks.has(pos))) {
       return true;
@@ -147,6 +147,7 @@ io.on('connection', (socket) => {
         id: playerId,
         name: playerName.trim(),
         isHost: true,
+        socketId: socket.id,
         marks: new Set()
       }]]),
       gameStarted: false,
@@ -201,27 +202,27 @@ io.on('connection', (socket) => {
       id: playerId,
       name: playerName.trim(),
       isHost: false,
+      socketId: socket.id,
       marks: new Set()
     };
     room.players.set(playerId, player);
 
-    // Give the new player a card (if game already started, give current card state)
+    // Every player gets a card at insert time. Late joiners receive theirs in
+    // JOINED_ROOM so they can play immediately; pre-game joins wait for GAME_STARTED.
     const card = generateCard();
     room.cards.set(playerId, card);
     room.lastActivity = Date.now();
 
     socket.join(code);
 
-    // Build player list for the joining client
+    // Build player list for the joining client (public fields only)
     const players = [];
     for (const p of room.players.values()) {
       players.push({
         id: p.id,
         name: p.name,
         isHost: p.isHost,
-        markCount: p.marks.size,
-        card: room.gameStarted ? room.cards.get(p.id) : null,
-        marks: room.gameStarted ? Array.from(p.marks) : []
+        markCount: p.marks.size
       });
     }
 
@@ -234,7 +235,7 @@ io.on('connection', (socket) => {
       gameStarted: room.gameStarted,
       bingoWinner: room.bingoWinner,
       card: room.gameStarted ? card : null,
-      marks: []
+      marks: room.gameStarted ? Array.from(player.marks) : []
     });
 
     // Notify others
@@ -261,29 +262,21 @@ io.on('connection', (socket) => {
     room.gameStarted = true;
     room.lastActivity = Date.now();
 
-    // Send each player their card and marks
-    for (const [pid, p] of room.players) {
-      const card = room.cards.get(pid);
-      socket.to(pid).emit('GAME_STARTED', {
-        card,
-        players: Array.from(room.players.values()).map(pl => ({
-          id: pl.id,
-          name: pl.name,
-          isHost: pl.isHost,
-          markCount: pl.marks.size
-        }))
-      });
-    }
-    // Tell the host they started too
-    socket.emit('GAME_STARTED', {
-      card: room.cards.get(currentPlayerId),
-      players: Array.from(room.players.values()).map(pl => ({
+    // Player ids are not socket ids, so address each socket explicitly instead of
+    // socket.to(playerId), which targeted a non-existent private room.
+    const publicPlayers = Array.from(room.players.values()).map(pl => ({
         id: pl.id,
         name: pl.name,
         isHost: pl.isHost,
         markCount: pl.marks.size
-      }))
-    });
+    }));
+
+    for (const p of room.players.values()) {
+      io.to(p.socketId).emit('GAME_STARTED', {
+        card: room.cards.get(p.id),
+        players: publicPlayers
+      });
+    }
 
     console.log(`Game started in room ${currentRoomCode}`);
   });
@@ -304,7 +297,7 @@ io.on('connection', (socket) => {
     }
     room.lastActivity = Date.now();
 
-    // Broadcast updated mark count to all
+    // Every player, including me, learns the new mark count from this broadcast.
     io.to(currentRoomCode).emit('SQUARE_MARKED', {
       playerId: currentPlayerId,
       playerName: player.name,
@@ -312,9 +305,14 @@ io.on('connection', (socket) => {
       marked: player.marks.has(cardIndex),
       markCount: player.marks.size
     });
+    // The authoritative mark set goes only to the player who owns that card,
+    // in a separate event: mark indexes are card positions, not global state.
+    socket.emit('MARKS_SYNC', { marks: Array.from(player.marks) });
 
-    // Check for bingo
-    if (player.marks.size >= 5 && checkBingo(player.marks)) {
+    // Check for bingo. Count the free space as marked but never let it be toggled.
+    const marksWithFree = new Set(player.marks);
+    marksWithFree.add(FREE_SPACE_INDEX);
+    if (checkBingo(marksWithFree)) {
       room.bingoWinner = currentPlayerId;
       room.lastActivity = Date.now();
 
