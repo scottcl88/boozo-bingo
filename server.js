@@ -102,6 +102,16 @@ function generateCard() {
   return card;
 }
 
+// Public player fields for client-facing lists (no socket id / internal state).
+function publicPlayers(room) {
+  return Array.from(room.players.values()).map((p) => ({
+    id: p.id,
+    name: p.name,
+    isHost: p.isHost,
+    markCount: p.marks.size
+  }));
+}
+
 // Check if a set of marks produces a bingo
 function checkBingo(marks) {
   for (const line of BINGO_LINES) {
@@ -112,10 +122,18 @@ function checkBingo(marks) {
   return false;
 }
 
-// Clean up empty/abandoned rooms every 5 minutes
+// Clean up abandoned rooms and disconnected players every 5 minutes.
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms.entries()) {
+    // Prune players who disconnected and never came back.
+    for (const [pid, p] of room.players) {
+      if (p.socketId === null && now - p.disconnectedAt > 5 * 60 * 1000) {
+        room.players.delete(pid);
+        room.cards.delete(pid);
+        console.log(`Removed disconnected player ${p.name} from room ${code}`);
+      }
+    }
     if (room.players.size === 0 && now - room.lastActivity > 5 * 60 * 1000) {
       rooms.delete(code);
       console.log(`Cleaned up empty room: ${code}`);
@@ -215,16 +233,7 @@ io.on('connection', (socket) => {
 
     socket.join(code);
 
-    // Build player list for the joining client (public fields only)
-    const players = [];
-    for (const p of room.players.values()) {
-      players.push({
-        id: p.id,
-        name: p.name,
-        isHost: p.isHost,
-        markCount: p.marks.size
-      });
-    }
+    const players = publicPlayers(room);
 
     socket.emit('JOINED_ROOM', {
       roomCode: code,
@@ -264,17 +273,13 @@ io.on('connection', (socket) => {
 
     // Player ids are not socket ids, so address each socket explicitly instead of
     // socket.to(playerId), which targeted a non-existent private room.
-    const publicPlayers = Array.from(room.players.values()).map(pl => ({
-        id: pl.id,
-        name: pl.name,
-        isHost: pl.isHost,
-        markCount: pl.marks.size
-    }));
+    const playerList = publicPlayers(room);
 
     for (const p of room.players.values()) {
+      if (!p.socketId) continue; // skip disconnected players
       io.to(p.socketId).emit('GAME_STARTED', {
         card: room.cards.get(p.id),
-        players: publicPlayers
+        players: playerList
       });
     }
 
@@ -324,8 +329,56 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── DISCONNECT ────────────────────────────────────────────────────────────
-  socket.on('disconnect', () => {
+  // ── REJOIN ROOM (resume after refresh / reconnect) ───────────────────────
+  socket.on('REJOIN_ROOM', ({ roomCode, playerId }) => {
+    if (!roomCode || !playerId) {
+      socket.emit('ERROR', { message: 'Invalid session.' });
+      return;
+    }
+
+    const code = String(roomCode).trim().toUpperCase();
+    const room = rooms.get(code);
+    if (!room) {
+      socket.emit('ERROR', { message: 'Room not found. It may have ended.' });
+      return;
+    }
+
+    const player = room.players.get(playerId);
+    if (!player) {
+      socket.emit('ERROR', { message: 'Your session has ended. Please rejoin.' });
+      return;
+    }
+
+    // Re-associate this socket with the retained player record.
+    currentRoomCode = code;
+    currentPlayerId = playerId;
+    player.socketId = socket.id;
+    delete player.disconnectedAt;
+    room.lastActivity = Date.now();
+    socket.join(code);
+
+    socket.emit('REJOINED_ROOM', {
+      roomCode: code,
+      playerId,
+      playerName: player.name,
+      players: publicPlayers(room),
+      isHost: player.isHost,
+      gameStarted: room.gameStarted,
+      bingoWinner: room.bingoWinner,
+      card: room.gameStarted ? room.cards.get(playerId) : null,
+      marks: room.gameStarted ? Array.from(player.marks) : []
+    });
+
+    // Tell everyone else this player is back.
+    socket.to(code).emit('PLAYER_JOINED', {
+      player: { id: playerId, name: player.name, isHost: player.isHost, markCount: player.marks.size }
+    });
+
+    console.log(`${player.name} rejoined room ${code}`);
+  });
+
+  // ── LEAVE ROOM (explicit leave) ───────────────────────────────────────────
+  socket.on('LEAVE_ROOM', (_payload, ack) => {
     if (currentRoomCode && currentPlayerId) {
       const room = rooms.get(currentRoomCode);
       if (room) {
@@ -340,6 +393,31 @@ io.on('connection', (socket) => {
           playerName
         });
         console.log(`${playerName} left room ${currentRoomCode}`);
+      }
+    }
+    currentRoomCode = null;
+    currentPlayerId = null;
+    if (typeof ack === 'function') ack();
+  });
+
+  // ── DISCONNECT (retain player so a quick refresh can resume) ──────────────
+  socket.on('disconnect', () => {
+    if (currentRoomCode && currentPlayerId) {
+      const room = rooms.get(currentRoomCode);
+      if (room) {
+        const player = room.players.get(currentPlayerId);
+        if (!player) return;
+        const playerName = player.name;
+        // Keep the record so a refresh/reconnect can resume; mark as disconnected.
+        player.socketId = null;
+        player.disconnectedAt = Date.now();
+        room.lastActivity = Date.now();
+
+        io.to(currentRoomCode).emit('PLAYER_LEFT', {
+          playerId: currentPlayerId,
+          playerName
+        });
+        console.log(`${playerName} disconnected from room ${currentRoomCode} (retained for resume)`);
       }
     }
   });

@@ -346,30 +346,41 @@ input[type="text"]:focus { border-color: var(--purple); }
 .game-body {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
-  gap: 0;
 }
 
 /* ── Bingo Card ──────────────────────────────────────────────────────── */
 .bingo-card-wrapper {
   flex: 1;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding: 1rem;
-  overflow-y: auto;
+  padding: clamp(0.5rem, 2vmin, 1rem);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  container-type: size;
 }
 
 .bingo-card {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 5px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  /* Fallback before container-query units are applied. */
   width: 100%;
-  max-width: 420px;
+  max-width: 480px;
+  /* Largest square that fits the available area (portrait + landscape + desktop). */
+  width: min(100cqw, 100cqh, 480px);
+  gap: clamp(3px, 1.2cqi, 6px);
+  aspect-ratio: 1 / 1;
 }
 
 .bingo-cell {
-  aspect-ratio: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--surface);
   border: 2px solid var(--border);
   border-radius: 8px;
@@ -387,12 +398,12 @@ input[type="text"]:focus { border-color: var(--purple); }
 
 .bingo-cell:active { transform: scale(0.94); }
 
-.bingo-cell .cell-emoji { font-size: clamp(1.2rem, 5vw, 1.8rem); line-height: 1; }
+.bingo-cell .cell-emoji { font-size: clamp(1rem, 5vw, 1.8rem); line-height: 1; }
 .bingo-cell .cell-label {
-  font-size: clamp(0.45rem, 1.8vw, 0.65rem);
+  font-size: clamp(0.42rem, 1.8vw, 0.68rem);
   font-weight: 700;
   text-align: center;
-  line-height: 1.1;
+  line-height: 1.15;
   color: var(--muted);
   max-width: 100%;
   overflow: hidden;
@@ -422,17 +433,17 @@ input[type="text"]:focus { border-color: var(--purple); }
 .bingo-cell.free-space .cell-label { color: var(--purple); }
 
 /* ── Game Sidebar ────────────────────────────────────────────────────── */
+/* Mobile default: a compact bottom bar under the board. */
 .game-sidebar {
-  width: 160px;
-  min-width: 140px;
-  border-left: 1px solid var(--border);
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
   background: var(--card-bg);
-  display: flex;
-  flex-direction: column;
+  display: block;
+  max-height: 45vh;
   overflow-y: auto;
 }
 
-.sidebar-section { padding: 0.75rem; }
+.sidebar-section { padding: 0.6rem 0.75rem; width: 100%; }
 
 .sidebar-label {
   font-size: 0.75rem;
@@ -513,27 +524,35 @@ input[type="text"]:focus { border-color: var(--purple); }
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
+/* Mobile (default): board fills the width, player list is a bottom bar. */
+#screen-game .player-list {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+#screen-game .player-list li {
+  flex: 0 1 auto;
+  min-width: 108px;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+}
+
 @media (max-width: 600px) {
-  .game-sidebar { display: none; }
-  .bingo-card { max-width: 100%; }
   .logo h1 { font-size: 2.5rem; }
   .logo-icon { font-size: 3rem; }
 }
 
-@media (min-width: 601px) {
-  /* Show player list in a bottom bar on game screen for medium screens */
-  #screen-game .game-body { flex-direction: column; }
+/* Desktop / landscape: board centered, player list as a right sidebar. */
+@media (min-width: 720px) {
+  .game-body { flex-direction: row; }
   .game-sidebar {
-    width: 100%;
-    min-width: unset;
-    border-left: none;
-    border-top: 1px solid var(--border);
-    flex-direction: row;
-    flex-wrap: wrap;
-    max-height: 120px;
-    overflow-y: auto;
+    flex: 0 0 220px;
+    max-height: none;
+    border-top: none;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
   }
-  .sidebar-section { flex: 1; min-width: 140px; }
-  .player-list { flex-direction: row; flex-wrap: wrap; gap: 0.3rem; }
-  .player-list li { flex: 1; min-width: 100px; }
+  #screen-game .player-list { flex-direction: column; }
+  #screen-game .player-list li { flex: 1; min-width: 0; }
 }

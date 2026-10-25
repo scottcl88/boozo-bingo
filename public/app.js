@@ -10,13 +10,59 @@ let myMarks = new Set();
 let bingoWinner = null;
 let players = [];
 
+// Session persistence: survive refreshes and accidental tab closes.
+const SESSION_KEY = 'boozo-bingo.session';
+
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (s && s.roomCode && s.playerId) return s;
+  } catch (e) { /* ignore corrupt storage */ }
+  return null;
+}
+
+function saveSession() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      roomCode: currentRoomCode,
+      playerId: myPlayerId,
+      playerName: myPlayerName
+    }));
+  } catch (e) { /* storage may be unavailable */ }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
+}
+
 // ── Init ───────────────────────────────────────────────────────────────
+let attemptingRejoin = false;
+
 function init() {
   socket = io();
 
-  socket.on('connect', () => console.log('Connected to server'));
+  socket.on('connect', () => {
+    console.log('Connected to server');
+    // Auto-resume a stored session (e.g. after a refresh or tab reopen).
+    const session = loadSession();
+    if (session) {
+      attemptingRejoin = true;
+      socket.emit('REJOIN_ROOM', { roomCode: session.roomCode, playerId: session.playerId });
+    }
+  });
 
-  socket.on('ERROR', ({ message }) => showError(message));
+  socket.on('ERROR', ({ message }) => {
+    // A failed rejoin means the stored session is stale; drop it so the next
+    // load starts clean at the home screen instead of looping.
+    if (attemptingRejoin) {
+      attemptingRejoin = false;
+      clearSession();
+      showScreen('home');
+    }
+    showError(message);
+  });
 
   socket.on('ROOM_CREATED', ({ roomCode, playerId, playerName }) => {
     myPlayerId = playerId;
@@ -24,6 +70,7 @@ function init() {
     currentRoomCode = roomCode;
     isHost = true;
     gameStarted = false;
+    saveSession();
     showScreen('lobby');
     renderLobby();
   });
@@ -39,10 +86,31 @@ function init() {
     myCard = card;
     myMarks = new Set(marks || []);
     if (winner) bingoWinner = winner;
+    saveSession();
 
     showScreen(started ? 'game' : 'lobby');
     renderLobby();
     if (started) renderGame();
+  });
+
+  socket.on('REJOINED_ROOM', ({ roomCode, playerId, playerName, players: playerList, isHost: host, gameStarted: started, bingoWinner: winner, card, marks }) => {
+    attemptingRejoin = false;
+    myPlayerId = playerId;
+    myPlayerName = playerName;
+    currentRoomCode = roomCode;
+    isHost = host;
+    gameStarted = started;
+    bingoWinner = winner;
+    players = playerList;
+    myCard = card;
+    myMarks = new Set(marks || []);
+    if (winner) bingoWinner = winner;
+    saveSession();
+
+    showScreen(started ? 'game' : 'lobby');
+    renderLobby();
+    if (started) renderGame();
+    if (winner) showWinnerModal(winner.name);
   });
 
   socket.on('PLAYER_JOINED', ({ player }) => {
@@ -122,9 +190,7 @@ function init() {
   });
 
   // ── Lobby events ──
-  document.getElementById('btn-lobby-leave').addEventListener('click', () => {
-    location.reload();
-  });
+  document.getElementById('btn-lobby-leave').addEventListener('click', leaveAndReset);
 
   document.getElementById('btn-copy-code').addEventListener('click', () => {
     navigator.clipboard.writeText(currentRoomCode).then(() => {
@@ -139,9 +205,7 @@ function init() {
   });
 
   // ── Game events ──
-  document.getElementById('btn-game-leave').addEventListener('click', () => {
-    location.reload();
-  });
+  document.getElementById('btn-game-leave').addEventListener('click', leaveAndReset);
 
   document.getElementById('btn-mark-bingo').addEventListener('click', () => {
     document.querySelectorAll('#bingo-card .bingo-cell').forEach(cell => {
@@ -158,6 +222,7 @@ function init() {
   });
 
   document.getElementById('btn-new-game').addEventListener('click', () => {
+    clearSession();
     location.reload();
   });
 }
@@ -330,6 +395,24 @@ function showError(msg) {
 }
 function clearError() {
   document.querySelectorAll('.error-msg').forEach(el => el.textContent = '');
+}
+
+// Leave the current room: clear local session, tell the server, then reset to
+// the home screen. Waiting on the ack avoids a ghost player lingering server-side.
+function leaveAndReset() {
+  const finish = () => {
+    myPlayerId = null;
+    currentRoomCode = null;
+    showScreen('home');
+  };
+  clearSession();
+  if (socket && socket.connected) {
+    socket.emit('LEAVE_ROOM', null, () => finish());
+    // Safety net in case the ack never arrives.
+    setTimeout(finish, 1500);
+  } else {
+    finish();
+  }
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────
