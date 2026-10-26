@@ -467,7 +467,10 @@ function updateShareLink() {
 
 // ── Errors ─────────────────────────────────────────────────────────────
 function showError(msg) {
-  const el = document.getElementById('home-error');
+  clearError();
+  const activeScreen = document.querySelector('.screen.active');
+  if (!activeScreen) return;
+  const el = activeScreen.querySelector('.error-msg');
   if (el) el.textContent = msg;
 }
 

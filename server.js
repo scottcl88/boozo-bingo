@@ -18,7 +18,6 @@ const MAX_ROOMS_PER_IP     = 3;    // rooms an IP can create per hour
 const MAX_CONNECTIONS_PER_IP = 20;  // concurrent socket connections per IP (matches room cap: a bar group shares one public IP)
 const MARK_RATE_WINDOW_MS  = 10_000; // window for mark rate limiting
 const MARKS_PER_WINDOW     = 10;   // max marks a player can emit per window
-const MIN_PLAYERS_TO_START = 2;    // prevent solo / accidental game start
 
 // ── SAFEGUARD STATE ────────────────────────────────────────────────────────────
 const rooms = new Map();
@@ -374,14 +373,6 @@ io.on('connection', (socket) => {
     }
 
     if (room.gameStarted) return; // already started
-
-    // Guard: require at least MIN_PLAYERS_TO_START to start
-    if (room.players.size < MIN_PLAYERS_TO_START) {
-      socket.emit('ERROR', {
-        message: `Need at least ${MIN_PLAYERS_TO_START} players to start. Wait for others!`
-      });
-      return;
-    }
 
     room.gameStarted = true;
     room.lastActivity = Date.now();
