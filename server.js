@@ -11,8 +11,72 @@ const io = new Server(httpServer, {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// In-memory room storage
+// ── SAFEGUARD CONSTANTS ────────────────────────────────────────────────────────
+const MAX_GLOBAL_ROOMS     = 50;    // hard cap to protect Railway 512MB RAM
+const MAX_PLAYERS_PER_ROOM = 20;   // sanity limit for a bar crawl
+const MAX_ROOMS_PER_IP     = 3;    // rooms an IP can create per hour
+const MAX_CONNECTIONS_PER_IP = 20;  // concurrent socket connections per IP (matches room cap: a bar group shares one public IP)
+const MARK_RATE_WINDOW_MS  = 10_000; // window for mark rate limiting
+const MARKS_PER_WINDOW     = 10;   // max marks a player can emit per window
+const MIN_PLAYERS_TO_START = 2;    // prevent solo / accidental game start
+
+// ── SAFEGUARD STATE ────────────────────────────────────────────────────────────
 const rooms = new Map();
+const ipTracker = new Map();
+const playerMarkTimestamps = new Map();
+
+// ── HEALTH CHECK ENDPOINT (Railway readiness probe) ────────────────────────────
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    rooms: rooms.size,
+    uptime: Math.floor(process.uptime()),
+    memoryUsage: process.memoryUsage(),
+  });
+});
+
+// ── SAFEGUARD HELPERS ──────────────────────────────────────────────────────────
+function getClientIp(socket) {
+  // Trust X-Forwarded-For when behind a proxy (Railway adds this)
+  const forwarded = socket.handshake.headers['x-forwarded-for'];
+  return forwarded ? forwarded.split(',')[0].trim() : socket.handshake.address;
+}
+
+function trackIp(ip) {
+  if (!ipTracker.has(ip)) {
+    ipTracker.set(ip, { roomCreations: [], connections: new Set() });
+  }
+  return ipTracker.get(ip);
+}
+
+function isRateLimited(ip, action, maxCount, windowMs) {
+  const tracker = trackIp(ip);
+  const now = Date.now();
+  const windowStart = now - windowMs;
+
+  // Filter to only events within the window
+  const recent = (tracker[action] || []).filter(ts => ts > windowStart);
+  tracker[action] = recent;
+
+  if (recent.length >= maxCount) {
+    return true;
+  }
+  recent.push(now);
+  return false;
+}
+
+function sanitizeName(name) {
+  if (typeof name !== 'string') return '';
+  // Strip HTML tags, trim, enforce max length
+  return name
+    .replace(/<[^>]*>/g, '')
+    .trim()
+    .slice(0, 20);
+}
+
+function isValidCardIndex(idx) {
+  return Number.isInteger(idx) && idx >= 0 && idx <= 24;
+}
 
 // Bingo square pool (24 items, one per non-center cell)
 const BINGO_ITEMS = [
@@ -142,7 +206,18 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
+  const ip = getClientIp(socket);
+  const ipData = trackIp(ip);
+
+  // ── Connection safeguard: per-IP concurrent connection limit ──
+  if (ipData.connections.size >= MAX_CONNECTIONS_PER_IP) {
+    socket.emit('ERROR', { message: 'Too many connections from your network. Try again shortly.' });
+    socket.disconnect(true);
+    return;
+  }
+  ipData.connections.add(socket.id);
+
+  console.log(`Client connected: ${socket.id} (IP: ${ip})`);
 
   let currentRoomCode = null;
   let currentPlayerId = null;
@@ -151,6 +226,25 @@ io.on('connection', (socket) => {
   socket.on('CREATE_ROOM', ({ playerName }) => {
     if (!playerName || playerName.trim().length === 0) {
       socket.emit('ERROR', { message: 'Please enter your name.' });
+      return;
+    }
+    const name = sanitizeName(playerName);
+    if (!name) {
+      socket.emit('ERROR', { message: 'Invalid name.' });
+      return;
+    }
+
+    const ip = getClientIp(socket);
+
+    // Per-IP room creation rate limit (3 rooms / hour)
+    if (isRateLimited(ip, 'roomCreations', MAX_ROOMS_PER_IP, 60 * 60 * 1000)) {
+      socket.emit('ERROR', { message: 'Too many rooms created. Try again later.' });
+      return;
+    }
+
+    // Global room cap
+    if (rooms.size >= MAX_GLOBAL_ROOMS) {
+      socket.emit('ERROR', { message: 'Server at capacity. Try again shortly.' });
       return;
     }
 
@@ -163,7 +257,7 @@ io.on('connection', (socket) => {
       code: roomCode,
       players: new Map([[playerId, {
         id: playerId,
-        name: playerName.trim(),
+        name,
         isHost: true,
         socketId: socket.id,
         marks: new Set()
@@ -176,12 +270,12 @@ io.on('connection', (socket) => {
     rooms.set(roomCode, room);
     socket.join(roomCode);
 
-    console.log(`Room ${roomCode} created by ${playerName}`);
+    console.log(`Room ${roomCode} created by ${name} (IP: ${ip})`);
 
     socket.emit('ROOM_CREATED', {
       roomCode,
       playerId,
-      playerName: playerName.trim()
+      playerName: name
     });
   });
 
@@ -189,6 +283,11 @@ io.on('connection', (socket) => {
   socket.on('JOIN_ROOM', ({ roomCode, playerName }) => {
     if (!playerName || playerName.trim().length === 0) {
       socket.emit('ERROR', { message: 'Please enter your name.' });
+      return;
+    }
+    const name = sanitizeName(playerName);
+    if (!name) {
+      socket.emit('ERROR', { message: 'Invalid name.' });
       return;
     }
     if (!roomCode || roomCode.trim().length === 0) {
@@ -204,9 +303,15 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Player cap per room
+    if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
+      socket.emit('ERROR', { message: 'Room is full (20 players max).' });
+      return;
+    }
+
     // Check for duplicate name
     for (const p of room.players.values()) {
-      if (p.name.toLowerCase() === playerName.trim().toLowerCase()) {
+      if (p.name.toLowerCase() === name.toLowerCase()) {
         socket.emit('ERROR', { message: 'That name is already taken. Pick another.' });
         return;
       }
@@ -218,7 +323,7 @@ io.on('connection', (socket) => {
 
     const player = {
       id: playerId,
-      name: playerName.trim(),
+      name,
       isHost: false,
       socketId: socket.id,
       marks: new Set()
@@ -238,7 +343,7 @@ io.on('connection', (socket) => {
     socket.emit('JOINED_ROOM', {
       roomCode: code,
       playerId,
-      playerName: playerName.trim(),
+      playerName: name,
       players,
       isHost: false,
       gameStarted: room.gameStarted,
@@ -249,10 +354,10 @@ io.on('connection', (socket) => {
 
     // Notify others
     socket.to(code).emit('PLAYER_JOINED', {
-      player: { id: playerId, name: playerName.trim(), isHost: false, markCount: 0 }
+      player: { id: playerId, name, isHost: false, markCount: 0 }
     });
 
-    console.log(`${playerName} joined room ${code}`);
+    console.log(`${name} joined room ${code}`);
   });
 
   // ── START GAME ────────────────────────────────────────────────────────────
@@ -267,6 +372,14 @@ io.on('connection', (socket) => {
     }
 
     if (room.gameStarted) return; // already started
+
+    // Guard: require at least MIN_PLAYERS_TO_START to start
+    if (room.players.size < MIN_PLAYERS_TO_START) {
+      socket.emit('ERROR', {
+        message: `Need at least ${MIN_PLAYERS_TO_START} players to start. Wait for others!`
+      });
+      return;
+    }
 
     room.gameStarted = true;
     room.lastActivity = Date.now();
@@ -283,16 +396,35 @@ io.on('connection', (socket) => {
       });
     }
 
-    console.log(`Game started in room ${currentRoomCode}`);
+    console.log(`Game started in room ${currentRoomCode} (${room.players.size} players)`);
   });
 
   // ── MARK / UNMARK SQUARE ──────────────────────────────────────────────────
   socket.on('MARK_SQUARE', ({ cardIndex }) => {
+    if (!isValidCardIndex(cardIndex)) {
+      socket.emit('ERROR', { message: 'Invalid square.' });
+      return;
+    }
+
     const room = rooms.get(currentRoomCode);
     if (!room || !room.gameStarted || room.bingoWinner) return;
 
     const player = room.players.get(currentPlayerId);
     if (!player) return;
+
+    // Rate limit: max MARKS_PER_WINDOW marks per MARK_RATE_WINDOW_MS
+    const now = Date.now();
+    const windowStart = now - MARK_RATE_WINDOW_MS;
+    if (!playerMarkTimestamps.has(currentPlayerId)) {
+      playerMarkTimestamps.set(currentPlayerId, []);
+    }
+    const ts = playerMarkTimestamps.get(currentPlayerId).filter(t => t > windowStart);
+    playerMarkTimestamps.set(currentPlayerId, ts);
+    if (ts.length >= MARKS_PER_WINDOW) {
+      socket.emit('ERROR', { message: 'Slow down! Too many marks too fast.' });
+      return;
+    }
+    ts.push(now);
 
     // Toggle mark
     if (player.marks.has(cardIndex)) {
@@ -320,6 +452,9 @@ io.on('connection', (socket) => {
     if (checkBingo(marksWithFree)) {
       room.bingoWinner = currentPlayerId;
       room.lastActivity = Date.now();
+
+      // Clean up rate-limit state for winner — no more marks accepted
+      playerMarkTimestamps.delete(currentPlayerId);
 
       io.to(currentRoomCode).emit('WINNER', {
         playerId: currentPlayerId,
@@ -402,6 +537,8 @@ io.on('connection', (socket) => {
 
   // ── DISCONNECT (retain player so a quick refresh can resume) ──────────────
   socket.on('disconnect', () => {
+    ipData.connections.delete(socket.id);
+
     if (currentRoomCode && currentPlayerId) {
       const room = rooms.get(currentRoomCode);
       if (room) {
@@ -420,6 +557,25 @@ io.on('connection', (socket) => {
         console.log(`${playerName} disconnected from room ${currentRoomCode} (retained for resume)`);
       }
     }
+
+    playerMarkTimestamps.delete(currentPlayerId);
+  });
+});
+
+// ── GRACEFUL SHUTDOWN ─────────────────────────────────────────────────────────
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received — closing server gracefully');
+  httpServer.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received — closing server gracefully');
+  httpServer.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
   });
 });
 

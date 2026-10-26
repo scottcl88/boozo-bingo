@@ -389,9 +389,11 @@ function launchConfetti() {
 
 // ── Errors ─────────────────────────────────────────────────────────────
 function showError(msg) {
-  const el = document.querySelector('.error-msg:not(#home-error), #home-error');
-  const target = document.getElementById('home-error');
-  if (target) target.textContent = msg;
+  clearError();
+  const activeScreen = document.querySelector('.screen.active');
+  if (!activeScreen) return;
+  const el = activeScreen.querySelector('.error-msg');
+  if (el) el.textContent = msg;
 }
 function clearError() {
   document.querySelectorAll('.error-msg').forEach(el => el.textContent = '');
