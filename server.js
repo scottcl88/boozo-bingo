@@ -106,24 +106,12 @@ const BINGO_ITEMS = [
   { id: 23, label: 'Themed Bar',        emoji: '🍺' },
 ];
 
-// Center cell is FREE SPACE (index 12)
-const FREE_SPACE_INDEX = 12;
-
-// Bingo lines: 12 possible winning lines (5 rows, 5 cols, 2 diagonals)
-const BINGO_LINES = [
-  [0,  1,  2,  3,  4],   // row 0
-  [5,  6,  7,  8,  9],   // row 1
-  [10, 11, 12, 13, 14],  // row 2 (contains free space)
-  [15, 16, 17, 18, 19],  // row 3
-  [20, 21, 22, 23, 24],  // row 4
-  [0,  5,  10, 15, 20],  // col 0
-  [1,  6,  11, 16, 21],  // col 1
-  [2,  7,  12, 17, 22],  // col 2 (contains free space)
-  [3,  8,  13, 18, 23],  // col 3
-  [4,  9,  14, 19, 24],  // col 4
-  [0,  6,  12, 18, 24],  // diagonal TL→BR (contains free space)
-  [4,  8,  12, 16, 20],  // diagonal TR→BL (contains free space)
-];
+// Card sizes and their parameters
+const CARD_SIZES = {
+  '3x3': { cells: 9,  freeIndex: 4, lines: [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]] },
+  '4x4': { cells: 16, freeIndex: null, lines: [[0,1,2,3],[4,5,6,7],[8,9,10,11],[12,13,14,15],[0,4,8,12],[1,5,9,13],[2,6,10,14],[3,7,11,15],[0,5,10,15],[3,6,9,12]] },
+  '5x5': { cells: 25, freeIndex: 12, lines: [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],[0,6,12,18,24],[4,8,12,16,20]] },
+};
 
 // Fisher-Yates shuffle
 function shuffle(array) {
@@ -140,7 +128,7 @@ function generatePlayerId() {
   return Math.random().toString(36).substring(2, 10);
 }
 
-// Generate a 5-character room code
+// Generate a short unique room code
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // unambiguous chars
   let code;
@@ -149,20 +137,31 @@ function generateRoomCode() {
     for (let i = 0; i < 5; i++) {
       code += chars[Math.floor(Math.random() * chars.length)];
     }
-  } while (rooms.has(code)); // ensure uniqueness
+  } while (rooms.has(code));
   return code;
 }
 
-// Build a 25-cell card for a player (array of 25 items, index 12 = free space)
-function generateCard() {
+// Build a card array for a player based on card size
+// 3x3: 8 items + free space in center
+// 4x4: 16 items, no free space
+// 5x5: 24 items + free space in center
+function generateCard(cardSize) {
+  const config = CARD_SIZES[cardSize] || CARD_SIZES['5x5'];
+  const { cells, freeIndex } = config;
   const shuffled = shuffle(BINGO_ITEMS);
-  const card = new Array(25);
-  // Fill positions 0-11, insert the free space at 12, then fill 13-24 with the
-  // remaining 12 items. (The old loop overwrote the centre cell and read past the
-  // end of the shuffled list, leaving 12 items unused and cell 24 blank.)
-  for (let i = 0; i < 12; i++) card[i] = shuffled[i];
-  card[FREE_SPACE_INDEX] = { id: -1, label: 'FREE SPACE', emoji: '👻' };
-  for (let i = FREE_SPACE_INDEX + 1; i < 25; i++) card[i] = shuffled[i - 1];
+  const card = new Array(cells);
+
+  if (freeIndex !== null) {
+    // Free space in center: fill before, insert free, fill after
+    const beforeCount = freeIndex;
+    const afterCount = cells - freeIndex - 1;
+    for (let i = 0; i < beforeCount; i++) card[i] = shuffled[i];
+    card[freeIndex] = { id: -1, label: 'FREE SPACE', emoji: '👻' };
+    for (let i = freeIndex + 1; i < cells; i++) card[i] = shuffled[i - 1];
+  } else {
+    // No free space: fill with shuffled items
+    for (let i = 0; i < cells; i++) card[i] = shuffled[i];
+  }
   return card;
 }
 
@@ -177,9 +176,10 @@ function publicPlayers(room) {
 }
 
 // Check if a set of marks produces a bingo
-function checkBingo(marks) {
-  for (const line of BINGO_LINES) {
-    if (line.every(pos => pos === FREE_SPACE_INDEX || marks.has(pos))) {
+function checkBingo(marks, cardSize) {
+  const config = CARD_SIZES[cardSize] || CARD_SIZES['5x5'];
+  for (const line of config.lines) {
+    if (line.every(pos => config.freeIndex === null || pos === config.freeIndex || marks.has(pos))) {
       return true;
     }
   }
@@ -223,7 +223,7 @@ io.on('connection', (socket) => {
   let currentPlayerId = null;
 
   // ── CREATE ROOM ──────────────────────────────────────────────────────────
-  socket.on('CREATE_ROOM', ({ playerName }) => {
+  socket.on('CREATE_ROOM', ({ playerName, cardSize }) => {
     if (!playerName || playerName.trim().length === 0) {
       socket.emit('ERROR', { message: 'Please enter your name.' });
       return;
@@ -253,8 +253,11 @@ io.on('connection', (socket) => {
     currentRoomCode = roomCode;
     currentPlayerId = playerId;
 
+    const validCardSize = CARD_SIZES[cardSize] ? cardSize : '5x5';
+
     const room = {
       code: roomCode,
+      cardSize: validCardSize,
       players: new Map([[playerId, {
         id: playerId,
         name,
@@ -263,14 +266,14 @@ io.on('connection', (socket) => {
         marks: new Set()
       }]]),
       gameStarted: false,
-      cards: new Map([[playerId, generateCard()]]),
+      cards: new Map([[playerId, generateCard(validCardSize)]]),
       bingoWinner: null,
       lastActivity: Date.now()
     };
     rooms.set(roomCode, room);
     socket.join(roomCode);
 
-    console.log(`Room ${roomCode} created by ${name} (IP: ${ip})`);
+    console.log(`Room ${roomCode} created by ${playerName} (cardSize: ${validCardSize})`);
 
     socket.emit('ROOM_CREATED', {
       roomCode,
@@ -330,9 +333,7 @@ io.on('connection', (socket) => {
     };
     room.players.set(playerId, player);
 
-    // Every player gets a card at insert time. Late joiners receive theirs in
-    // JOINED_ROOM so they can play immediately; pre-game joins wait for GAME_STARTED.
-    const card = generateCard();
+    const card = generateCard(room.cardSize);
     room.cards.set(playerId, card);
     room.lastActivity = Date.now();
 
@@ -348,6 +349,7 @@ io.on('connection', (socket) => {
       isHost: false,
       gameStarted: room.gameStarted,
       bingoWinner: room.bingoWinner,
+      cardSize: room.cardSize,
       card: room.gameStarted ? card : null,
       marks: room.gameStarted ? Array.from(player.marks) : []
     });
@@ -384,14 +386,13 @@ io.on('connection', (socket) => {
     room.gameStarted = true;
     room.lastActivity = Date.now();
 
-    // Player ids are not socket ids, so address each socket explicitly instead of
-    // socket.to(playerId), which targeted a non-existent private room.
     const playerList = publicPlayers(room);
 
     for (const p of room.players.values()) {
-      if (!p.socketId) continue; // skip disconnected players
+      if (!p.socketId) continue;
       io.to(p.socketId).emit('GAME_STARTED', {
         card: room.cards.get(p.id),
+        cardSize: room.cardSize,
         players: playerList
       });
     }
@@ -407,7 +408,7 @@ io.on('connection', (socket) => {
     }
 
     const room = rooms.get(currentRoomCode);
-    if (!room || !room.gameStarted || room.bingoWinner) return;
+    if (!room || !room.gameStarted) return;
 
     const player = room.players.get(currentPlayerId);
     if (!player) return;
@@ -426,6 +427,9 @@ io.on('connection', (socket) => {
     }
     ts.push(now);
 
+    const config = CARD_SIZES[room.cardSize] || CARD_SIZES['5x5'];
+    if (cardIndex === config.freeIndex) return; // never allow toggling free space
+
     // Toggle mark
     if (player.marks.has(cardIndex)) {
       player.marks.delete(cardIndex);
@@ -434,7 +438,6 @@ io.on('connection', (socket) => {
     }
     room.lastActivity = Date.now();
 
-    // Every player, including me, learns the new mark count from this broadcast.
     io.to(currentRoomCode).emit('SQUARE_MARKED', {
       playerId: currentPlayerId,
       playerName: player.name,
@@ -442,14 +445,12 @@ io.on('connection', (socket) => {
       marked: player.marks.has(cardIndex),
       markCount: player.marks.size
     });
-    // The authoritative mark set goes only to the player who owns that card,
-    // in a separate event: mark indexes are card positions, not global state.
     socket.emit('MARKS_SYNC', { marks: Array.from(player.marks) });
 
-    // Check for bingo. Count the free space as marked but never let it be toggled.
+    // Check for bingo — include free space if present
     const marksWithFree = new Set(player.marks);
-    marksWithFree.add(FREE_SPACE_INDEX);
-    if (checkBingo(marksWithFree)) {
+    if (config.freeIndex !== null) marksWithFree.add(config.freeIndex);
+    if (checkBingo(marksWithFree, room.cardSize)) {
       room.bingoWinner = currentPlayerId;
       room.lastActivity = Date.now();
 
@@ -484,7 +485,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Re-associate this socket with the retained player record.
     currentRoomCode = code;
     currentPlayerId = playerId;
     player.socketId = socket.id;
@@ -500,11 +500,11 @@ io.on('connection', (socket) => {
       isHost: player.isHost,
       gameStarted: room.gameStarted,
       bingoWinner: room.bingoWinner,
+      cardSize: room.cardSize,
       card: room.gameStarted ? room.cards.get(playerId) : null,
       marks: room.gameStarted ? Array.from(player.marks) : []
     });
 
-    // Tell everyone else this player is back.
     socket.to(code).emit('PLAYER_JOINED', {
       player: { id: playerId, name: player.name, isHost: player.isHost, markCount: player.marks.size }
     });
@@ -535,7 +535,7 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack();
   });
 
-  // ── DISCONNECT (retain player so a quick refresh can resume) ──────────────
+  // ── DISCONNECT ───────────────────────────────────────────────────────────
   socket.on('disconnect', () => {
     ipData.connections.delete(socket.id);
 
@@ -545,7 +545,6 @@ io.on('connection', (socket) => {
         const player = room.players.get(currentPlayerId);
         if (!player) return;
         const playerName = player.name;
-        // Keep the record so a refresh/reconnect can resume; mark as disconnected.
         player.socketId = null;
         player.disconnectedAt = Date.now();
         room.lastActivity = Date.now();

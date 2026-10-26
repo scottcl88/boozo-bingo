@@ -11,8 +11,30 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>" />
 </head>
 <body>
+
+  <!-- ── SHARE-LINK JOIN SCREEN (shown when URL has ?join=CODE) ─────────── -->
+  <div id="screen-join-link" class="screen">
+    <div class="join-link-glow"></div>
+    <div class="join-link-content">
+      <div class="logo">
+        <span class="logo-icon">🎃</span>
+        <h1>Boozo Bingo</h1>
+        <p class="tagline">Halloween Bar Crawl Edition</p>
+      </div>
+      <div class="card form-card">
+        <p class="join-link-intro">You've been invited to join a room!</p>
+        <div class="input-group">
+          <label for="join-name">Your Name</label>
+          <input id="join-name" type="text" placeholder="e.g. Ghostface" maxlength="20" autocomplete="off" />
+        </div>
+        <button id="btn-join-link" class="btn btn-primary btn-lg">Join Room 🎃</button>
+        <p id="join-link-error" class="error-msg"></p>
+      </div>
+    </div>
+  </div>
+
   <!-- ── HOME SCREEN ─────────────────────────────────────────────────── -->
-  <div id="screen-home" class="screen active">
+  <div id="screen-home" class="screen">
     <div class="home-glow"></div>
     <div class="home-content">
       <div class="logo">
@@ -49,13 +71,24 @@
       <div class="room-code-box">
         <p class="room-code-label">Room Code</p>
         <div class="room-code-display" id="lobby-code"></div>
-        <button id="btn-copy-code" class="btn btn-ghost btn-sm">📋 Copy</button>
+        <div class="room-code-actions">
+          <button id="btn-copy-code" class="btn btn-ghost btn-sm">📋 Copy</button>
+          <button id="btn-share-link" class="btn btn-ghost btn-sm">🔗 Share Link</button>
+        </div>
       </div>
       <div class="players-section">
         <p class="players-label">Players (<span id="lobby-player-count">1</span>)</p>
         <ul id="lobby-player-list" class="player-list"></ul>
       </div>
       <div class="lobby-actions">
+        <!-- Card size selector (host only, shown before game starts) -->
+        <div class="card-size-selector" id="card-size-selector">
+          <p class="players-label">Card Size</p>
+          <div class="card-size-options">
+            <button class="card-size-btn" data-size="3x3">3×3</button>
+            <button class="card-size-btn active" data-size="5x5">5×5</button>
+          </div>
+        </div>
         <button id="btn-start" class="btn btn-primary btn-lg">🎃 Start Game</button>
         <p id="lobby-error" class="error-msg"></p>
       </div>
@@ -89,16 +122,16 @@
     </div>
   </div>
 
-  <!-- ── WINNER MODAL ────────────────────────────────────────────────── -->
-  <div id="winner-modal" class="modal" style="display:none">
-    <div class="confetti" id="confetti-canvas"></div>
-    <div class="modal-content winner-modal-content">
-      <div class="winner-emoji">👻</div>
-      <h2 class="winner-title" id="winner-title">BINGO!</h2>
-      <p class="winner-name" id="winner-name"></p>
-      <p class="winner-perk">Winner picks:<br><strong>🧃 Free drink</strong> or <strong>🎯 Next stop!</strong></p>
-      <button id="btn-dismiss-winner" class="btn btn-primary">Let's Go! 👻</button>
+  <!-- ── WINNER ALERT (in-game, dismissible) ─────────────────────────── -->
+  <div id="winner-alert" class="winner-alert" style="display:none">
+    <div class="winner-alert-inner">
+      <span class="winner-alert-emoji">👻</span>
+      <div class="winner-alert-text">
+        <strong id="winner-alert-name"></strong> got BINGO!
+      </div>
+      <button id="btn-dismiss-winner" class="btn btn-primary btn-sm">Let's Go! 👻</button>
     </div>
+    <canvas id="confetti-canvas"></canvas>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

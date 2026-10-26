@@ -6,11 +6,18 @@ let currentRoomCode = null;
 let isHost = false;
 let gameStarted = false;
 let myCard = null;
+let myCardSize = '5x5';
 let myMarks = new Set();
 let bingoWinner = null;
 let players = [];
 
-// Session persistence: survive refreshes and accidental tab closes.
+// Selected card size (host only, defaults to 5x5)
+let selectedCardSize = '5x5';
+
+// Join-link room code if arriving via ?join=CODE
+let joinLinkRoomCode = null;
+
+// Session persistence
 const SESSION_KEY = 'boozo-bingo.session';
 
 function loadSession() {
@@ -43,9 +50,21 @@ let attemptingRejoin = false;
 function init() {
   socket = io();
 
+  // Detect if we arrived via a share link
+  const params = new URLSearchParams(window.location.search);
+  joinLinkRoomCode = params.get('join');
+
   socket.on('connect', () => {
     console.log('Connected to server');
-    // Auto-resume a stored session (e.g. after a refresh or tab reopen).
+
+    // If arriving via share link, show the join-link screen
+    if (joinLinkRoomCode) {
+      joinLinkRoomCode = joinLinkRoomCode.trim().toUpperCase();
+      showScreen('join-link');
+      return;
+    }
+
+    // Otherwise, try to auto-rejoin a stored session
     const session = loadSession();
     if (session) {
       attemptingRejoin = true;
@@ -54,8 +73,6 @@ function init() {
   });
 
   socket.on('ERROR', ({ message }) => {
-    // A failed rejoin means the stored session is stale; drop it so the next
-    // load starts clean at the home screen instead of looping.
     if (attemptingRejoin) {
       attemptingRejoin = false;
       clearSession();
@@ -70,12 +87,15 @@ function init() {
     currentRoomCode = roomCode;
     isHost = true;
     gameStarted = false;
+    bingoWinner = null;
     saveSession();
     showScreen('lobby');
     renderLobby();
+    // Update share link button
+    updateShareLink();
   });
 
-  socket.on('JOINED_ROOM', ({ roomCode, playerId, playerName, players: playerList, isHost: host, gameStarted: started, bingoWinner: winner, card, marks }) => {
+  socket.on('JOINED_ROOM', ({ roomCode, playerId, playerName, players: playerList, isHost: host, gameStarted: started, bingoWinner: winner, cardSize, card, marks }) => {
     myPlayerId = playerId;
     myPlayerName = playerName;
     currentRoomCode = roomCode;
@@ -84,6 +104,7 @@ function init() {
     bingoWinner = winner;
     players = playerList;
     myCard = card;
+    myCardSize = cardSize || '5x5';
     myMarks = new Set(marks || []);
     if (winner) bingoWinner = winner;
     saveSession();
@@ -91,9 +112,11 @@ function init() {
     showScreen(started ? 'game' : 'lobby');
     renderLobby();
     if (started) renderGame();
+    // If winner already exists, show the alert
+    if (winner) showWinnerAlert(winner.name || winner);
   });
 
-  socket.on('REJOINED_ROOM', ({ roomCode, playerId, playerName, players: playerList, isHost: host, gameStarted: started, bingoWinner: winner, card, marks }) => {
+  socket.on('REJOINED_ROOM', ({ roomCode, playerId, playerName, players: playerList, isHost: host, gameStarted: started, bingoWinner: winner, cardSize, card, marks }) => {
     attemptingRejoin = false;
     myPlayerId = playerId;
     myPlayerName = playerName;
@@ -103,6 +126,7 @@ function init() {
     bingoWinner = winner;
     players = playerList;
     myCard = card;
+    myCardSize = cardSize || '5x5';
     myMarks = new Set(marks || []);
     if (winner) bingoWinner = winner;
     saveSession();
@@ -110,7 +134,7 @@ function init() {
     showScreen(started ? 'game' : 'lobby');
     renderLobby();
     if (started) renderGame();
-    if (winner) showWinnerModal(winner.name);
+    if (winner) showWinnerAlert(winner.name || winner);
   });
 
   socket.on('PLAYER_JOINED', ({ player }) => {
@@ -119,19 +143,16 @@ function init() {
     if (gameStarted) renderGamePlayers();
   });
 
-  socket.on('PLAYER_LEFT', ({ playerId, playerName }) => {
+  socket.on('PLAYER_LEFT', ({ playerId }) => {
     players = players.filter(p => p.id !== playerId);
-    if (document.getElementById('screen-lobby').classList.contains('active')) {
-      renderLobbyPlayers();
-    }
-    if (document.getElementById('screen-game').classList.contains('active')) {
-      renderGamePlayers();
-    }
+    renderLobbyPlayers();
+    if (gameStarted) renderGamePlayers();
   });
 
-  socket.on('GAME_STARTED', ({ card, players: playerList }) => {
+  socket.on('GAME_STARTED', ({ card, cardSize, players: playerList }) => {
     gameStarted = true;
     myCard = card;
+    myCardSize = cardSize || '5x5';
     myMarks = new Set();
     players = playerList;
     bingoWinner = null;
@@ -147,8 +168,6 @@ function init() {
 
   socket.on('SQUARE_MARKED', ({ playerId, playerName, cardIndex, marked, markCount }) => {
     if (playerId === myPlayerId) {
-      // MARKS_SYNC carries the authoritative set for my card; this event only
-      // keeps mark counts and the optimistic-free UI honest.
       if (marked) myMarks.add(cardIndex);
       else myMarks.delete(cardIndex);
       syncMyCells();
@@ -160,9 +179,20 @@ function init() {
 
   socket.on('WINNER', ({ playerId, playerName }) => {
     bingoWinner = { id: playerId, name: playerName };
-    showWinnerModal(playerName);
-    const markBtn = document.getElementById('btn-mark-bingo');
-    if (markBtn) markBtn.style.display = 'none';
+    showWinnerAlert(playerName);
+    updateMarkBingoButton();
+  });
+
+  // ── Join-link screen events ──
+  document.getElementById('btn-join-link').addEventListener('click', () => {
+    const name = document.getElementById('join-name').value.trim();
+    if (!name) { showJoinLinkError('Please enter your name.'); return; }
+    clearError();
+    socket.emit('JOIN_ROOM', { roomCode: joinLinkRoomCode, playerName: name });
+  });
+
+  document.getElementById('join-name').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('btn-join-link').click();
   });
 
   // ── Home screen events ──
@@ -170,7 +200,7 @@ function init() {
     const name = document.getElementById('home-name').value.trim();
     if (!name) { showError('Please enter your name.'); return; }
     clearError();
-    socket.emit('CREATE_ROOM', { playerName: name });
+    socket.emit('CREATE_ROOM', { playerName: name, cardSize: selectedCardSize });
   });
 
   document.getElementById('btn-join').addEventListener('click', () => {
@@ -200,6 +230,25 @@ function init() {
     });
   });
 
+  document.getElementById('btn-share-link').addEventListener('click', () => {
+    const url = `${window.location.origin}${window.location.pathname}?join=${currentRoomCode}`;
+    navigator.clipboard.writeText(url).then(() => {
+      const btn = document.getElementById('btn-share-link');
+      btn.textContent = '✅ Link Copied!';
+      setTimeout(() => { btn.textContent = '🔗 Share Link'; }, 2000);
+    });
+  });
+
+  // Card size selector (host only)
+  document.querySelectorAll('.card-size-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!isHost || gameStarted) return;
+      document.querySelectorAll('.card-size-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedCardSize = btn.dataset.size;
+    });
+  });
+
   document.getElementById('btn-start').addEventListener('click', () => {
     socket.emit('START_GAME');
   });
@@ -208,17 +257,15 @@ function init() {
   document.getElementById('btn-game-leave').addEventListener('click', leaveAndReset);
 
   document.getElementById('btn-mark-bingo').addEventListener('click', () => {
-    document.querySelectorAll('#bingo-card .bingo-cell').forEach(cell => {
-      if (!cell.classList.contains('free-space')) {
-        cell.classList.add('marked');
-        myMarks.add(parseInt(cell.dataset.index, 10));
-      }
+    document.querySelectorAll('#bingo-card .bingo-cell:not(.free-space)').forEach(cell => {
+      cell.classList.add('marked');
+      myMarks.add(parseInt(cell.dataset.index, 10));
     });
     document.getElementById('btn-mark-bingo').style.display = 'none';
   });
 
   document.getElementById('btn-dismiss-winner').addEventListener('click', () => {
-    document.getElementById('winner-modal').style.display = 'none';
+    dismissWinnerAlert();
   });
 
   document.getElementById('btn-new-game').addEventListener('click', () => {
@@ -238,6 +285,12 @@ function renderLobby() {
   document.getElementById('lobby-code').textContent = currentRoomCode;
   renderLobbyPlayers();
   document.getElementById('btn-start').style.display = isHost ? 'block' : 'none';
+
+  // Show card size selector only for host and only before game starts
+  const selector = document.getElementById('card-size-selector');
+  if (selector) {
+    selector.style.display = isHost && !gameStarted ? 'flex' : 'none';
+  }
 }
 
 function renderLobbyPlayers() {
@@ -260,23 +313,30 @@ function renderGame() {
   document.getElementById('btn-new-game').style.display = bingoWinner ? 'inline-block' : 'none';
 }
 
-// Offer the "I got BINGO" shortcut once the board is nearly complete, so nobody
-// has to tap nineteen squares on a phone at a bar. Marks still go through the server.
 function updateMarkBingoButton() {
   const btn = document.getElementById('btn-mark-bingo');
   if (!btn) return;
   if (bingoWinner || !myCard) { btn.style.display = 'none'; return; }
-  const remaining = myCard.filter((item, i) => item.id !== -1 && !myMarks.has(i)).length;
-  btn.style.display = remaining <= 7 ? 'inline-block' : 'none';
+  const totalCells = myCard.length;
+  const markedCells = myMarks.size;
+  const unmarked = totalCells - markedCells;
+  btn.style.display = unmarked <= 2 ? 'inline-block' : 'none';
 }
 
 function renderBingoCard() {
   const cardEl = document.getElementById('bingo-card');
   if (!myCard) return;
+
+  // Set grid columns based on card size
+  const size = myCardSize || '5x5';
+  const dimension = parseInt(size, 10);
+  cardEl.style.gridTemplateColumns = `repeat(${dimension}, minmax(0, 1fr))`;
+  cardEl.style.gridTemplateRows = `repeat(${dimension}, minmax(0, 1fr))`;
+
   cardEl.innerHTML = myCard.map((item, i) => {
     const isFree = item.id === -1;
     const isMarked = isFree || myMarks.has(i);
-    if (isFree) myMarks.add(i); // ensure free space is always marked
+    if (isFree) myMarks.add(i);
     return `
       <div class="bingo-cell${isFree ? ' free-space' : ''}${isMarked && !isFree ? ' marked' : ''}"
            data-index="${i}"
@@ -287,19 +347,15 @@ function renderBingoCard() {
     `;
   }).join('');
 
-  // Attach tap handlers
+  // Attach tap handlers (never block on bingoWinner — continue playing after win)
   cardEl.querySelectorAll('.bingo-cell:not(.free-space)').forEach(cell => {
     cell.addEventListener('click', () => {
-      if (bingoWinner) return;
       const idx = parseInt(cell.dataset.index, 10);
-      // No optimistic toggle: the server echo drives the UI, so a rejected or
-      // racing tap can never desync the board from real state.
       socket.emit('MARK_SQUARE', { cardIndex: idx });
     });
   });
 }
 
-// Re-render marks from myMarks without rebuilding the card (keeps handlers).
 function syncMyCells() {
   document.querySelectorAll('#bingo-card .bingo-cell').forEach(cell => {
     if (cell.classList.contains('free-space')) return;
@@ -318,11 +374,10 @@ function renderGamePlayers() {
   `).join('');
 }
 
-// Re-sync a player from a server event without clobbering existing entries.
-function updatePlayerFromServer({ playerId, playerName, markCount, isHost }) {
+function updatePlayerFromServer({ playerId, playerName, markCount, isHost: hostFlag }) {
   let p = players.find(x => x.id === playerId);
   if (!p) {
-    p = { id: playerId, name: playerName || 'Player', isHost: !!isHost, markCount: markCount || 0 };
+    p = { id: playerId, name: playerName || 'Player', isHost: !!hostFlag, markCount: markCount || 0 };
     players.push(p);
   } else {
     if (typeof markCount === 'number') p.markCount = markCount;
@@ -331,42 +386,58 @@ function updatePlayerFromServer({ playerId, playerName, markCount, isHost }) {
   return p;
 }
 
-// ── Winner Modal ───────────────────────────────────────────────────────
-function showWinnerModal(playerName) {
-  document.getElementById('winner-name').textContent = playerName;
-  document.getElementById('winner-modal').style.display = 'flex';
+// ── Winner Alert (dismissible, game continues) ─────────────────────────
+let winnerAlertDismissed = false;
+
+function showWinnerAlert(playerName) {
+  winnerAlertDismissed = false;
+  document.getElementById('winner-alert-name').textContent = playerName;
+  document.getElementById('winner-alert').style.display = 'block';
   launchConfetti();
   document.getElementById('btn-new-game').style.display = 'inline-block';
+  document.getElementById('btn-mark-bingo').style.display = 'none';
+}
+
+function dismissWinnerAlert() {
+  winnerAlertDismissed = true;
+  document.getElementById('winner-alert').style.display = 'none';
 }
 
 // ── Confetti ───────────────────────────────────────────────────────────
 function launchConfetti() {
   const canvas = document.getElementById('confetti-canvas');
+  if (!canvas) return;
   canvas.innerHTML = '';
   const ctx = canvas.getContext('2d');
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+
+  // Size the canvas to the viewport
+  const viewportW = window.innerWidth;
+  const viewportH = window.innerHeight;
+  canvas.width = viewportW;
+  canvas.height = viewportH;
+  canvas.style.width = viewportW + 'px';
+  canvas.style.height = viewportH + 'px';
 
   const colors = ['#ff6b2b', '#b14aff', '#39ff14', '#ff4a4a', '#ffd700', '#00d4ff'];
   const pieces = [];
 
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 100; i++) {
     pieces.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height - canvas.height,
-      w: Math.random() * 8 + 4,
-      h: Math.random() * 6 + 3,
+      x: Math.random() * viewportW,
+      y: Math.random() * viewportH - viewportH,
+      w: Math.random() * 8 + 3,
+      h: Math.random() * 5 + 2,
       color: colors[Math.floor(Math.random() * colors.length)],
       rot: Math.random() * 360,
-      rotSpeed: (Math.random() - 0.5) * 8,
-      speedY: Math.random() * 3 + 2,
-      speedX: (Math.random() - 0.5) * 2,
+      rotSpeed: (Math.random() - 0.5) * 7,
+      speedY: Math.random() * 3 + 1.5,
+      speedX: (Math.random() - 0.5) * 1.5,
     });
   }
 
   let frame = 0;
   function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, viewportW, viewportH);
     pieces.forEach(p => {
       ctx.save();
       ctx.translate(p.x, p.y);
@@ -382,35 +453,42 @@ function launchConfetti() {
     });
     frame++;
     if (frame < 140) requestAnimationFrame(draw);
-    else ctx.clearRect(0, 0, canvas.width, canvas.height);
+    else ctx.clearRect(0, 0, viewportW, viewportH);
   }
   draw();
 }
 
+// ── Share Link ─────────────────────────────────────────────────────────
+function updateShareLink() {
+  // Share link button is in lobby; nothing extra needed here
+}
+
 // ── Errors ─────────────────────────────────────────────────────────────
 function showError(msg) {
-  clearError();
-  const activeScreen = document.querySelector('.screen.active');
-  if (!activeScreen) return;
-  const el = activeScreen.querySelector('.error-msg');
+  const el = document.getElementById('home-error');
   if (el) el.textContent = msg;
 }
+
+function showJoinLinkError(msg) {
+  const el = document.getElementById('join-link-error');
+  if (el) el.textContent = msg;
+}
+
 function clearError() {
   document.querySelectorAll('.error-msg').forEach(el => el.textContent = '');
 }
 
-// Leave the current room: clear local session, tell the server, then reset to
-// the home screen. Waiting on the ack avoids a ghost player lingering server-side.
+// ── Leave & Reset ──────────────────────────────────────────────────────
 function leaveAndReset() {
   const finish = () => {
     myPlayerId = null;
     currentRoomCode = null;
+    bingoWinner = null;
     showScreen('home');
   };
   clearSession();
   if (socket && socket.connected) {
     socket.emit('LEAVE_ROOM', null, () => finish());
-    // Safety net in case the ack never arrives.
     setTimeout(finish, 1500);
   } else {
     finish();
