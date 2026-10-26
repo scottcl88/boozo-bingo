@@ -79,30 +79,30 @@ function isValidCardIndex(idx) {
 
 // Bingo square pool (24 items, one per non-center cell)
 const BINGO_ITEMS = [
-  { id: 0,  label: 'Witch',             emoji: '🧙‍♀️' },
-  { id: 1,  label: 'Vampire',           emoji: '🧛' },
-  { id: 2,  label: 'Skeleton',          emoji: '💀' },
-  { id: 3,  label: 'Zombie',            emoji: '🧟' },
-  { id: 4,  label: 'Ghost',             emoji: '👻' },
-  { id: 5,  label: 'Werewolf',          emoji: '🐺' },
-  { id: 6,  label: 'Devil',             emoji: '😈' },
-  { id: 7,  label: 'Angel',             emoji: '👼' },
-  { id: 8,  label: 'Superhero',         emoji: '🦸' },
-  { id: 9,  label: 'Movie Character',   emoji: '🎬' },
-  { id: 10, label: 'Clown',             emoji: '🤡' },
-  { id: 11, label: 'Pirate',            emoji: '🏴‍☠️' },
-  { id: 12, label: 'Black Cat',         emoji: '🐈‍⬛' },
-  { id: 13, label: 'Scary Mask',        emoji: '🎭' },
-  { id: 14, label: 'Fortune Teller',    emoji: '🔮' },
-  { id: 15, label: 'Flaming Cocktail',  emoji: '🍸' },
-  { id: 16, label: 'Fog Machine',       emoji: '🌫️' },
-  { id: 17, label: 'Costume Contest',   emoji: '🏆' },
-  { id: 18, label: 'Makeup/Creature',   emoji: '👹' },
-  { id: 19, label: 'Group Costume',     emoji: '👥' },
-  { id: 20, label: 'Kid in Costume',    emoji: '🧒' },
-  { id: 21, label: 'Pet Costume',       emoji: '🐶' },
-  { id: 22, label: 'Decoration',        emoji: '🎃' },
-  { id: 23, label: 'Themed Bar',        emoji: '🍺' },
+  { id: 0,  label: 'Witch',                  emoji: '🧙‍♀️' },
+  { id: 1,  label: 'Vampire',                emoji: '🧛' },
+  { id: 2,  label: 'Skeleton',               emoji: '💀' },
+  { id: 3,  label: 'Zombie',                 emoji: '🧟' },
+  { id: 4,  label: 'Ghost',                  emoji: '👻' },
+  { id: 5,  label: 'Devil',                  emoji: '😈' },
+  { id: 6,  label: 'Angel',                  emoji: '👼' },
+  { id: 7,  label: 'Clown',                  emoji: '🤡' },
+  { id: 8,  label: 'Pirate',                 emoji: '🏴‍☠️' },
+  { id: 9,  label: 'Cowboy / Cowgirl',       emoji: '🤠' },
+  { id: 10, label: 'Superhero',              emoji: '🦸' },
+  { id: 11, label: 'Royalty',                emoji: '👑' },
+  { id: 12, label: 'Firefighter',            emoji: '🧑‍🚒' },
+  { id: 13, label: 'Police Officer',         emoji: '👮' },
+  { id: 14, label: 'Cheerleader',            emoji: '📣' },
+  { id: 15, label: 'Athlete / Sports Player', emoji: '🏈' },
+  { id: 16, label: 'Fairy',                  emoji: '🧚' },
+  { id: 17, label: 'Animal Costume',         emoji: '🐾' },
+  { id: 18, label: 'Doctor / Nurse',         emoji: '🩺' },
+  { id: 19, label: 'Alien',                  emoji: '👽' },
+  { id: 20, label: 'Inflatable Costume',     emoji: '🎈' },
+  { id: 21, label: 'Food Costume',           emoji: '🌭' },
+  { id: 22, label: 'Couples Costume',        emoji: '💑' },
+  { id: 23, label: 'Group Costume',          emoji: '👥' },
 ];
 
 // Card sizes and their parameters
@@ -174,15 +174,15 @@ function publicPlayers(room) {
   }));
 }
 
-// Check if a set of marks produces a bingo
-function checkBingo(marks, cardSize) {
+// Return the winning line (array of positions) if the marks complete one.
+function findBingoLine(marks, cardSize) {
   const config = CARD_SIZES[cardSize] || CARD_SIZES['5x5'];
   for (const line of config.lines) {
     if (line.every(pos => config.freeIndex === null || pos === config.freeIndex || marks.has(pos))) {
-      return true;
+      return line;
     }
   }
-  return false;
+  return null;
 }
 
 // Clean up abandoned rooms and disconnected players every 5 minutes.
@@ -441,8 +441,9 @@ io.on('connection', (socket) => {
     // Check for bingo — include free space if present
     const marksWithFree = new Set(player.marks);
     if (config.freeIndex !== null) marksWithFree.add(config.freeIndex);
-    if (checkBingo(marksWithFree, room.cardSize)) {
-      room.bingoWinner = currentPlayerId;
+    const winningLine = findBingoLine(marksWithFree, room.cardSize);
+    if (winningLine) {
+      room.bingoWinner = { playerId: currentPlayerId, playerName: player.name, line: winningLine };
       room.lastActivity = Date.now();
 
       // Clean up rate-limit state for winner — no more marks accepted
@@ -450,10 +451,38 @@ io.on('connection', (socket) => {
 
       io.to(currentRoomCode).emit('WINNER', {
         playerId: currentPlayerId,
-        playerName: player.name
+        playerName: player.name,
+        line: winningLine
       });
       console.log(`BINGO! ${player.name} wins in room ${currentRoomCode}`);
     }
+  });
+
+  // ── NEW CARD (personal reset at any time) ───────────────────────────────
+  socket.on('NEW_CARD', () => {
+    const room = rooms.get(currentRoomCode);
+    if (!room) return;
+
+    const player = room.players.get(currentPlayerId);
+    if (!player) return;
+
+    const newCard = generateCard(room.cardSize);
+    room.cards.set(currentPlayerId, newCard);
+    player.marks = new Set();
+    playerMarkTimestamps.delete(currentPlayerId);
+
+    // If this player is the current winner, clear the win so a fresh card
+    // (and a later rejoin) doesn't re-highlight a stale line.
+    if (room.bingoWinner && room.bingoWinner.playerId === currentPlayerId) {
+      room.bingoWinner = null;
+    }
+
+    room.lastActivity = Date.now();
+
+    socket.emit('NEW_CARD', { card: newCard, cardSize: room.cardSize });
+
+    // Let the whole room (including this player) see the marks reset to zero.
+    io.to(currentRoomCode).emit('PLAYER_RESET', { playerId: currentPlayerId });
   });
 
   // ── REJOIN ROOM (resume after refresh / reconnect) ───────────────────────

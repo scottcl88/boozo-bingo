@@ -498,6 +498,21 @@ input[type="text"]:focus { border-color: var(--purple); }
 
 .bingo-cell.free-space .cell-label { color: var(--purple); }
 
+/* Winning line: the cells that completed the bingo glow green. */
+.bingo-cell.bingo-line {
+  background: linear-gradient(135deg, #0f2a10, #164a1a);
+  border-color: var(--green);
+  box-shadow: 0 0 14px rgba(57,255,20,0.5), inset 0 0 12px rgba(57,255,20,0.15);
+  animation: bingoLinePulse 1.4s ease-in-out infinite;
+}
+
+.bingo-cell.bingo-line .cell-label { color: var(--green); }
+
+@keyframes bingoLinePulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(57,255,20,0.5), inset 0 0 12px rgba(57,255,20,0.15); }
+  50%       { box-shadow: 0 0 22px rgba(57,255,20,0.75), inset 0 0 16px rgba(57,255,20,0.25); }
+}
+
 /* ── Game Sidebar (mobile: compact bottom bar) ──────────────────────── */
 .game-sidebar {
   flex: 0 0 auto;

@@ -8,6 +8,7 @@ let gameStarted = false;
 let myCard = null;
 let myCardSize = '5x5';
 let myMarks = new Set();
+let myBingoLine = null;
 let bingoWinner = null;
 let players = [];
 
@@ -108,14 +109,14 @@ function init() {
     myCard = card;
     myCardSize = cardSize || '5x5';
     myMarks = new Set(marks || []);
-    if (winner) bingoWinner = winner;
+    myBingoLine = (winner && winner.playerId === myPlayerId && winner.line) ? new Set(winner.line) : null;
     saveSession();
 
     showScreen(started ? 'game' : 'lobby');
     renderLobby();
     if (started) renderGame();
     // If winner already exists, show the alert
-    if (winner) showWinnerAlert(winner.name || winner);
+    if (winner) showWinnerAlert(winner.playerName);
   });
 
   socket.on('REJOINED_ROOM', ({ roomCode, playerId, playerName, players: playerList, isHost: host, gameStarted: started, bingoWinner: winner, cardSize, card, marks }) => {
@@ -130,13 +131,13 @@ function init() {
     myCard = card;
     myCardSize = cardSize || '5x5';
     myMarks = new Set(marks || []);
-    if (winner) bingoWinner = winner;
+    myBingoLine = (winner && winner.playerId === myPlayerId && winner.line) ? new Set(winner.line) : null;
     saveSession();
 
     showScreen(started ? 'game' : 'lobby');
     renderLobby();
     if (started) renderGame();
-    if (winner) showWinnerAlert(winner.name || winner);
+    if (winner) showWinnerAlert(winner.playerName);
   });
 
   socket.on('PLAYER_JOINED', ({ player }) => {
@@ -156,6 +157,7 @@ function init() {
     myCard = card;
     myCardSize = cardSize || '5x5';
     myMarks = new Set();
+    myBingoLine = null;
     players = playerList;
     bingoWinner = null;
     showScreen('game');
@@ -179,10 +181,25 @@ function init() {
     updateMarkBingoButton();
   });
 
-  socket.on('WINNER', ({ playerId, playerName }) => {
-    bingoWinner = { id: playerId, name: playerName };
+  socket.on('WINNER', ({ playerId, playerName, line }) => {
+    bingoWinner = { playerId, playerName, line };
+    if (playerId === myPlayerId) highlightBingoLine(line);
     showWinnerAlert(playerName);
     updateMarkBingoButton();
+  });
+
+  socket.on('NEW_CARD', ({ card, cardSize }) => {
+    myCard = card;
+    myCardSize = cardSize || myCardSize;
+    myMarks = new Set();
+    myBingoLine = null;
+    bingoWinner = null;
+    renderGame();
+  });
+
+  socket.on('PLAYER_RESET', ({ playerId }) => {
+    updatePlayerFromServer({ playerId, markCount: 0 });
+    renderGamePlayers();
   });
 
   // ── Join-link screen events ──
@@ -270,9 +287,8 @@ function init() {
     dismissWinnerAlert();
   });
 
-  document.getElementById('btn-new-game').addEventListener('click', () => {
-    clearSession();
-    location.reload();
+  document.getElementById('btn-new-card').addEventListener('click', () => {
+    socket.emit('NEW_CARD');
   });
 }
 
@@ -312,7 +328,6 @@ function renderGame() {
   renderBingoCard();
   renderGamePlayers();
   updateMarkBingoButton();
-  document.getElementById('btn-new-game').style.display = bingoWinner ? 'inline-block' : 'none';
 }
 
 function updateMarkBingoButton() {
@@ -338,9 +353,10 @@ function renderBingoCard() {
   cardEl.innerHTML = myCard.map((item, i) => {
     const isFree = item.id === -1;
     const isMarked = isFree || myMarks.has(i);
+    const isBingoLine = myBingoLine ? myBingoLine.has(i) : false;
     if (isFree) myMarks.add(i);
     return `
-      <div class="bingo-cell${isFree ? ' free-space' : ''}${isMarked && !isFree ? ' marked' : ''}"
+      <div class="bingo-cell${isFree ? ' free-space' : ''}${isMarked && !isFree ? ' marked' : ''}${isBingoLine ? ' bingo-line' : ''}"
            data-index="${i}"
            data-label="${escHtml(item.label)}">
         <span class="cell-emoji">${item.emoji}</span>
@@ -360,9 +376,21 @@ function renderBingoCard() {
 
 function syncMyCells() {
   document.querySelectorAll('#bingo-card .bingo-cell').forEach(cell => {
-    if (cell.classList.contains('free-space')) return;
     const idx = parseInt(cell.dataset.index, 10);
-    cell.classList.toggle('marked', myMarks.has(idx));
+    if (!cell.classList.contains('free-space')) {
+      cell.classList.toggle('marked', myMarks.has(idx));
+    }
+    if (myBingoLine) {
+      cell.classList.toggle('bingo-line', myBingoLine.has(idx));
+    }
+  });
+}
+
+function highlightBingoLine(line) {
+  myBingoLine = new Set(line || []);
+  document.querySelectorAll('#bingo-card .bingo-cell').forEach(cell => {
+    const idx = parseInt(cell.dataset.index, 10);
+    cell.classList.toggle('bingo-line', myBingoLine.has(idx));
   });
 }
 
@@ -396,7 +424,6 @@ function showWinnerAlert(playerName) {
   document.getElementById('winner-alert-name').textContent = playerName;
   document.getElementById('winner-alert').style.display = 'block';
   launchConfetti();
-  document.getElementById('btn-new-game').style.display = 'inline-block';
   document.getElementById('btn-mark-bingo').style.display = 'none';
 }
 

@@ -140,6 +140,18 @@ function once(socket, event, timeout = 4000) {
   }
   const win = await winP.catch(() => null);
   check('bingo detected for host (free-space row)', win && win.playerId === created.playerId, win);
+  check('winner payload carries winning line', win && Array.isArray(win.line) && win.line.length === 5, win && win.line);
+  check('winning line is the completed free-space row', win && JSON.stringify(win.line) === '[10,11,12,13,14]', win && win.line);
+
+  // 8b. A player can request a fresh card at any time (resets marks + card).
+  const newCardP = once(host, 'NEW_CARD');
+  const guestResetP = once(guest, 'PLAYER_RESET');
+  host.emit('NEW_CARD');
+  const newCard = await newCardP;
+  check('new card is a full 25-cell card', Array.isArray(newCard.card) && newCard.card.length === 25, newCard.card);
+  check('new card differs from original', JSON.stringify(newCard.card) !== JSON.stringify(hStart.card), null);
+  const guestReset = await guestResetP;
+  check('opponent sees new-card mark reset', guestReset.playerId === created.playerId, guestReset);
 
   // 9. Duplicate name rejected
   const dup = await new Promise((resolve) => {
