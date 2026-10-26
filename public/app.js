@@ -69,6 +69,8 @@ function init() {
     if (session) {
       attemptingRejoin = true;
       socket.emit('REJOIN_ROOM', { roomCode: session.roomCode, playerId: session.playerId });
+    } else {
+      showScreen('home');
     }
   });
 
