@@ -15,7 +15,7 @@ const textColorOf = (sel) => { const start = css.indexOf(sel + ' {'); assert(sta
 
 test('primary button text meets WCAG AA (4.5:1) on its fill', () => { const r = ratio(textColorOf('.btn-primary'), token('accent')); assert(r >= 4.5, 'contrast ' + r.toFixed(2)); });
 test('secondary button text meets WCAG AA (4.5:1) on its fill', () => { const r = ratio(textColorOf('.btn-secondary'), token('purple')); assert(r >= 4.5, 'contrast ' + r.toFixed(2)); });
-test('player mark-count text meets WCAG AA on the list surface (axe color-contrast regression)', () => { const m = css.match(/\\.player-list li \\.mark-count \\{[^}]*?color:\\s*(#[0-9a-fA-F]{6})/); assert(m, 'mark-count color must be a hex literal'); const r = ratio(m[1], token('surface')); assert(r >= 4.5, 'contrast ' + r.toFixed(2)); });
+test('player mark-count text meets WCAG AA on the list surface (axe color-contrast regression)', () => { const start = css.indexOf('.player-list li .mark-count {'); assert(start >= 0, 'mark-count rule missing'); const body = css.slice(start, css.indexOf('}', start)); const m = body.match(/(?:^|[\s;{])color:\s*(#[0-9a-fA-F]{6})/); assert(m, 'mark-count color must be a hex literal'); const r = ratio(m[1], token('surface')); assert(r >= 4.5, 'contrast ' + r.toFixed(2)); });
 test('bingo cells are real buttons with aria-pressed (keyboard playable)', () => { assert(/<button type="button" class="bingo-cell/.test(js), 'cell not a button'); assert(/aria-pressed=/.test(js), 'no aria-pressed'); assert(!/<div class="bingo-cell/.test(js), 'div cell still present'); });
 test('aria-pressed is kept in sync when marks change', () => { assert(/setAttribute\('aria-pressed'/.test(js)); });
 test('page has a main landmark', () => { assert(/<main>[\s\S]*<\/main>/.test(html)); });
