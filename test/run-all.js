@@ -5,7 +5,7 @@ const net = require('net');
 const http = require('http');
 const path = require('path');
 
-const SUITES = ['e2e.js', 'persistence.js'];
+const SUITES = ['e2e.js', 'persistence.js', 'gate-proof.js'];
 
 function freePort() {
   return new Promise((resolve, reject) => {
