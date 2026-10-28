@@ -217,7 +217,7 @@ function init() {
   // ── Home screen events ──
   document.getElementById('btn-create').addEventListener('click', () => {
     const name = document.getElementById('home-name').value.trim();
-    if (!name) { showError('Please enter your name.'); return; }
+    if (!name) { showError('Please enter your name.', 'home-name-error'); return; }
     clearError();
     socket.emit('CREATE_ROOM', { playerName: name, cardSize: selectedCardSize });
   });
@@ -225,7 +225,7 @@ function init() {
   document.getElementById('btn-join').addEventListener('click', () => {
     const name = document.getElementById('home-name').value.trim();
     const code = document.getElementById('home-code').value.trim().toUpperCase();
-    if (!name) { showError('Please enter your name.'); return; }
+    if (!name) { showError('Please enter your name.', 'home-name-error'); return; }
     if (!code) { showError('Please enter a room code.'); return; }
     clearError();
     socket.emit('JOIN_ROOM', { roomCode: code, playerName: name });
@@ -356,12 +356,14 @@ function renderBingoCard() {
     const isBingoLine = myBingoLine ? myBingoLine.has(i) : false;
     if (isFree) myMarks.add(i);
     return `
-      <div class="bingo-cell${isFree ? ' free-space' : ''}${isMarked && !isFree ? ' marked' : ''}${isBingoLine ? ' bingo-line' : ''}"
+      <button type="button" class="bingo-cell${isFree ? ' free-space' : ''}${isMarked && !isFree ? ' marked' : ''}${isBingoLine ? ' bingo-line' : ''}"
            data-index="${i}"
-           data-label="${escHtml(item.label)}">
-        <span class="cell-emoji">${item.emoji}</span>
+           data-label="${escHtml(item.label)}"
+           aria-pressed="${isMarked ? 'true' : 'false'}"
+           aria-label="${escHtml(item.label)}${isFree ? ' (free space)' : ''}"${isFree ? ' disabled' : ''}>
+        <span class="cell-emoji" aria-hidden="true">${item.emoji}</span>
         <span class="cell-label">${item.label}</span>
-      </div>
+      </button>
     `;
   }).join('');
 
@@ -379,6 +381,7 @@ function syncMyCells() {
     const idx = parseInt(cell.dataset.index, 10);
     if (!cell.classList.contains('free-space')) {
       cell.classList.toggle('marked', myMarks.has(idx));
+      cell.setAttribute('aria-pressed', myMarks.has(idx) ? 'true' : 'false');
     }
     if (myBingoLine) {
       cell.classList.toggle('bingo-line', myBingoLine.has(idx));
@@ -493,12 +496,15 @@ function updateShareLink() {
 }
 
 // ── Errors ─────────────────────────────────────────────────────────────
-function showError(msg) {
+// Errors render next to the field that caused them when a targetId is given (role="alert" announces them).
+function showError(msg, targetId) {
   clearError();
   const activeScreen = document.querySelector('.screen.active');
   if (!activeScreen) return;
-  const el = activeScreen.querySelector('.error-msg');
+  const el = (targetId && document.getElementById(targetId)) || activeScreen.querySelector('.error-msg:not(#home-name-error)');
   if (el) el.textContent = msg;
+  const name = document.getElementById('home-name');
+  if (name) name.setAttribute('aria-invalid', targetId === 'home-name-error' ? 'true' : 'false');
 }
 
 function showJoinLinkError(msg) {
@@ -508,6 +514,8 @@ function showJoinLinkError(msg) {
 
 function clearError() {
   document.querySelectorAll('.error-msg').forEach(el => el.textContent = '');
+  const name = document.getElementById('home-name');
+  if (name) name.removeAttribute('aria-invalid');
 }
 
 // ── Leave & Reset ──────────────────────────────────────────────────────
