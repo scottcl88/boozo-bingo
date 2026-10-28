@@ -3,6 +3,8 @@ services:
     runtime: node
     region: oregon
     plan: free
+    # Deploy only after the GitHub CI checks for the commit pass (blueprint-managed services).
+    autoDeployTrigger: checksPass
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /
