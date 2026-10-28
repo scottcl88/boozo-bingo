@@ -12,6 +12,8 @@
   --text:       #f5f5f5;
   --muted:      #888899;
   --border:     #3a3a5c;
+  /* Text on the bright orange/purple button fills: white was 2.84:1 (WCAG AA needs 4.5:1). */
+  --on-bright:  #0d0d0d;
 }
 
 html, body {
@@ -210,14 +212,14 @@ input[type="text"]:focus { border-color: var(--purple); }
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-bright);
   box-shadow: 0 4px 20px rgba(255,107,43,0.4);
 }
 .btn-primary:hover { box-shadow: 0 4px 28px rgba(255,107,43,0.6); }
 
 .btn-secondary {
   background: var(--purple);
-  color: #fff;
+  color: var(--on-bright);
   box-shadow: 0 4px 20px rgba(177,74,255,0.4);
 }
 
@@ -615,3 +617,12 @@ input[type="text"]:focus { border-color: var(--purple); }
   #screen-game .player-list { flex-direction: column; }
   #screen-game .player-list li { flex: 1; min-width: 0; }
 }
+
+/* ── Accessibility (design assessment B-P0-1, B-P1-2, B-P1-3, B-P2-3) ─────── */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+button.bingo-cell { font: inherit; color: inherit; appearance: none; -webkit-appearance: none; }
+button.bingo-cell:disabled { opacity: 1; }
+.btn:focus-visible, button.bingo-cell:focus-visible, input[type="text"]:focus-visible, .card-size-btn:focus-visible {
+  outline: 3px solid #ffffff; outline-offset: 2px;
+}
+.error-msg:empty { display: none; }

@@ -11,6 +11,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>" />
 </head>
 <body>
+  <main>
 
   <!-- ── SHARE-LINK JOIN SCREEN (shown when URL has ?join=CODE) ─────────── -->
   <div id="screen-join-link" class="screen">
@@ -45,7 +46,8 @@
       <div class="card form-card">
         <div class="input-group">
           <label for="home-name">Your Name</label>
-          <input id="home-name" type="text" placeholder="e.g. Ghostface" maxlength="20" autocomplete="off" />
+          <input id="home-name" type="text" placeholder="e.g. Ghostface" maxlength="20" autocomplete="off" aria-describedby="home-name-error" />
+          <p id="home-name-error" class="error-msg" role="alert"></p>
         </div>
         <div class="home-actions">
           <button id="btn-create" class="btn btn-primary">Create Room</button>
@@ -55,13 +57,14 @@
             <button id="btn-join" class="btn btn-secondary">Join</button>
           </div>
         </div>
-        <p id="home-error" class="error-msg"></p>
+        <p id="home-error" class="error-msg" role="alert"></p>
       </div>
     </div>
   </div>
 
   <!-- ── LOBBY SCREEN ────────────────────────────────────────────────── -->
   <div id="screen-lobby" class="screen">
+    <h1 class="sr-only">Waiting room</h1>
     <div class="lobby-header">
       <button id="btn-lobby-leave" class="btn btn-ghost btn-sm">← Leave</button>
       <h2>Waiting Room</h2>
@@ -97,6 +100,7 @@
 
   <!-- ── GAME SCREEN ─────────────────────────────────────────────────── -->
   <div id="screen-game" class="screen">
+    <h1 class="sr-only">Your bingo card</h1>
     <div class="game-header">
       <div class="game-header-left">
         <button id="btn-game-leave" class="btn btn-ghost btn-sm">← Leave</button>
@@ -129,10 +133,12 @@
       <div class="winner-alert-text">
         <strong id="winner-alert-name"></strong> got BINGO!
       </div>
-      <button id="btn-dismiss-winner" class="btn btn-primary btn-sm">Let's Go! 👻</button>
+      <button id="btn-dismiss-winner" class="btn btn-primary btn-sm">Keep playing</button>
     </div>
     <canvas id="confetti-canvas"></canvas>
   </div>
+
+  </main>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
