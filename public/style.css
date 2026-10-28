@@ -370,7 +370,7 @@ input[type="text"]:focus { border-color: var(--purple); }
 
 .player-list li .mark-count {
   font-size: 0.82rem;
-  color: var(--purple);
+  color: #d7a8ff; /* AA on --surface (purple #b14aff was < 4.5:1) */
   font-weight: 700;
 }
 
