@@ -361,7 +361,7 @@ input[type="text"]:focus { border-color: var(--purple); }
 
 .player-list li .host-badge {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-bright);
   font-size: 0.68rem;
   padding: 0.15rem 0.45rem;
   border-radius: 99px;
