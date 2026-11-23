@@ -1,12 +1,13 @@
 # boozo-bingo — project status
 
-> Auto-synced by OpenClaw cloud-sync (2026-11-23 14:28 UTC) from the assistant's project record
-> on the RaspberryPi. Source of truth: `scottcl88/projects-vault` → `projects/` record
-> and `projects/index.md`. Regenerated on every sync; local edits will be overwritten.
+> Auto-synced by OpenClaw cloud-sync from the assistant's project record on the
+> RaspberryPi. Source of truth: `scottcl88/projects-vault` → `projects/` record
+> and `projects/index.md`. Regenerated on every sync; local edits will be
+> overwritten. (Timestamps of the last sync are in the vault's
+> `sync/state.json` and this file's commit history.)
 
 - **Repo:** https://github.com/scottcl88/boozo-bingo
 - **Status (last recorded):** see project record
-- **Last synced:** 2026-11-23 14:28 UTC
 
 ## Project record
 - `docs/project-record/SPEC.md`
